@@ -21,9 +21,10 @@ MAX_NUM_IMAGES_PER_CLASS = 2 ** 27 - 1  # ~134M
 testing_percentage = 10
 validation_percentage = 10
 
-width = 720
-height = 1280
+width = 405
+height = 720
 
+class_names = []
 
 # Gather the images in the olive oil photos folder and make them into something tensor flow can understand
 def create_image_lists():
@@ -44,13 +45,16 @@ def create_image_lists():
     testing_images = []
     testing_labels = []
 
-    for sub_dir in sub_dirs:
+    for label_index, sub_dir in enumerate(sub_dirs):
         extensions = ['png', 'jpg', 'jpeg']
         file_list = []
         dir_name = os.path.basename(sub_dir)
         if dir_name == image_dir:
             print("root dir, will skip")
             continue
+
+        global class_names
+        class_names.append(dir_name)
 
         print("Looking for images in '" + dir_name + "'")
         for extension in extensions:
@@ -63,11 +67,10 @@ def create_image_lists():
             # ex: IMG_2223.png
 
             # Resize all the images so they are manageable
-            image = Image.open("./" + file_name).convert('LA')
-            image.thumbnail((height, width))
+            image = Image.open("./" + file_name)
+            image.thumbnail((width, height))
             image.save("./" + file_name)
-            image_array = np.array(image)[:,:,0]
-            #image_array = image_array.transpose(2, 0, 1).reshape(3, -1)
+            image_array = np.array(image)[:,:,0] #Make greyscale and get rid of 3rd dimension https://stackoverflow.com/questions/14365029/numpy-3d-image-array-to-2d
             print(image_array.shape)
 
             hash_name = re.sub(r'_nohash_.*$', '', file_name)
@@ -82,14 +85,13 @@ def create_image_lists():
             percentage_hash = ((int(hash_name_hashed, 16) %
                                 (MAX_NUM_IMAGES_PER_CLASS + 1)) *
                                (100.0 / MAX_NUM_IMAGES_PER_CLASS))
-            if percentage_hash < validation_percentage:
-                validation_images.append(base_name)
-            elif percentage_hash < (testing_percentage + validation_percentage):
-                testing_images.append(base_name)
-                testing_labels.append(dir_name)
+
+            if percentage_hash < (testing_percentage + validation_percentage):
+                testing_images.append(image_array)
+                testing_labels.append(label_index - 1)
             else:
                 training_images.append(image_array)
-                training_labels.append(dir_name)
+                training_labels.append(label_index - 1)
 
         result[dir_name] = {
             'dir': dir_name,
@@ -97,19 +99,13 @@ def create_image_lists():
             'testing': np.array(testing_images),
             'validation': np.array(validation_images),
         }
-    return (np.array(training_images), training_labels), (testing_images, testing_labels)
+    return (np.array(training_images), np.array(training_labels)), (np.array(testing_images), np.array(testing_labels))
 
-#fashion_mnist = tf.keras.datasets.fashion_mnist
 
-#(train_images, train_labels), (test_images, test_labels) = fashion_mnist.load_data()
 (train_images, train_labels), (test_images, test_labels) = create_image_lists()
 
-class_names = ['T-shirt/top', 'Trouser', 'Pullover', 'Dress', 'Coat',
-               'Sandal', 'Shirt', 'Sneaker', 'Bag', 'Ankle boot']
-
-print(type(train_images))
 print(train_images.shape)
-print(train_labels)
+print(test_images.shape)
 print(tf.__version__)
 
 # Scale these values to a range of 0 to 1 before feeding them to the neural network model. To do so, divide the values by 255.
@@ -117,35 +113,40 @@ print(tf.__version__)
 train_images = train_images / 255.0
 test_images = test_images / 255.0
 
-plt.figure(figsize=(10, 10))
-for i in range(25):
-    plt.subplot(5, 5, i + 1)
-    plt.xticks([])
-    plt.yticks([])
-    plt.grid(False)
-    plt.imshow(train_images[i], cmap=plt.cm.binary)
-    plt.xlabel(class_names[train_labels[i]])
-plt.show()
+# plt.figure(figsize=(10, 10))
+# for i in range(25):
+#     plt.subplot(5, 5, i + 1)
+#     plt.xticks([])
+#     plt.yticks([])
+#     plt.grid(False)
+#     plt.imshow(train_images[i], cmap=plt.cm.binary)
+#     plt.xlabel(class_names[train_labels[i]])
+# plt.show()
+print(len(class_names))
 
 model = tf.keras.Sequential([
-    tf.keras.layers.Flatten(input_shape=(width, height)),  # Make 1D array of pixels
+    tf.keras.layers.Flatten(input_shape=(height, width)),  # Make 1D array of pixels
     tf.keras.layers.Dense(128, activation='relu'),
-    tf.keras.layers.Dense(10)
+    tf.keras.layers.Dense(len(class_names))
 ])
 
 model.compile(optimizer='adam',
               loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True),
               metrics=['accuracy'])
 
-model.fit(train_images, train_labels, epochs=10)
+model.fit(train_images, train_labels, epochs=len(class_names))
 
 test_loss, test_acc = model.evaluate(test_images, test_labels, verbose=2)
 print('\nTest accuracy:', test_acc)
 
 probability_model = tf.keras.Sequential([model,
                                          tf.keras.layers.Softmax()])
+
+
 predictions = probability_model.predict(test_images)  # Array or arrays of which ones it should be
-np.argmax(predictions[0])
+print(predictions[0])
+print(np.argmax(predictions[0]))
+
 print(test_labels[0])
 
 # test single image on the model
@@ -155,3 +156,10 @@ predictions_single = probability_model.predict(img)
 
 print(predictions_single)
 np.argmax(predictions_single[0])
+
+print("test image")
+img = test_images[1]
+print(img.shape)
+predictions_single = probability_model.predict(img)
+
+print(predictions_single)
